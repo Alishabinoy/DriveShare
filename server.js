@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const net = require("node:net");
+const connectDB = require("./db");
 
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 5000;
@@ -31,96 +32,85 @@ function getNextAvailablePort(startPort = DEFAULT_PORT, maxAttempts = 20) {
 
 app.use(express.json());
 
-let users = [];
+// Users are now stored in MongoDB
 
-let rides = [
-  {
-    id: 1,
-    from: "RSET",
-    to: "Kakkanad Metro",
-    date: "2026-09-01",
-    time: "5:00 PM",
-    seats: 2,
-    owner: "Anu",
-    requests: []
-  },
-  {
-    id: 2,
-    from: "RSET",
-    to: "Aluva",
-    date: "2026-09-01",
-    time: "4:30 PM",
-    seats: 3,
-    owner: "Rahul",
-    requests: []
-  }
-];
+// Rides are now stored in MongoDB
 
 /* LOGIN */
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
-  const user = users.find(
-    u => u.email === email && u.password === password
-  );
+  const db = await connectDB();
 
-  if (!user) {
-    return res.status(401).json({
-      message: "Invalid login"
-    });
-  }
-
-  res.json(user);
-});
-
-/* SIGNUP */
-app.post("/api/signup", (req, res) => {
-  const { name, email, password } = req.body;
-
-  if (users.find(u => u.email === email)) {
-    return res.status(400).json({
-      message: "User already exists"
-    });
-  }
-
-  const user = {
-    id: users.length + 1,
-    name,
+  const user = await db.collection("users").findOne({
     email,
     password
-  };
+  });
 
-  users.push(user);
+  if (!user) {
+    return res.status(401).json({ message: "Invalid login" });
+  }
 
   res.json({
-    message: "Signup successful"
+    id: user._id,
+    name: user.name,
+    email: user.email
   });
 });
 
+/* SIGNUP */
+app.post("/api/signup", async (req, res) => {
+  const { name, email, password } = req.body;
+
+  const db = await connectDB();
+
+  const existingUser = await db.collection("users").findOne({ email });
+
+  if (existingUser) {
+    return res.status(400).json({ message: "User already exists" });
+  }
+
+  await db.collection("users").insertOne({
+    name,
+    email,
+    password
+  });
+
+  res.json({ message: "Signup successful" });
+});
+
 /* GET ALL RIDES */
-app.get("/api/rides", (req, res) => {
+app.get("/api/rides", async (req, res) => {
+  const db = await connectDB();
+
+  const rides = await db.collection("rides").find().toArray();
+
   res.json(rides);
 });
 
 /* GET ONE RIDE */
-app.get("/api/rides/:id", (req, res) => {
-  const ride = rides.find(r => r.id == req.params.id);
+app.get("/api/rides/:id", async (req, res) => {
+  const { ObjectId } = require("mongodb");
+  const db = await connectDB();
+
+  const ride = await db.collection("rides").findOne({
+    _id: new ObjectId(req.params.id)
+  });
 
   if (!ride) {
-    return res.status(404).json({
-      message: "Ride not found"
-    });
+    return res.status(404).json({ message: "Ride not found" });
   }
 
   res.json(ride);
 });
 
 /* CREATE RIDE */
-app.post("/api/rides", (req, res) => {
+app.post("/api/rides", async (req, res) => {
   const { from, to, date, time, seats, owner } = req.body;
 
+  const db = await connectDB();
+
   const ride = {
-    id: rides.length + 1,
     from,
     to,
     date,
@@ -130,58 +120,95 @@ app.post("/api/rides", (req, res) => {
     requests: []
   };
 
-  rides.push(ride);
+  const result = await db.collection("rides").insertOne(ride);
 
   res.json({
     message: "Ride created",
-    ride
+    ride: { ...ride, _id: result.insertedId }
   });
 });
 
 /* REQUEST TO JOIN */
-app.post("/api/rides/:id/request", (req, res) => {
-  const ride = rides.find(r => r.id == req.params.id);
+app.post("/api/rides/:id/request", async (req, res) => {
+  const { ObjectId } = require("mongodb");
   const { user } = req.body;
 
+  const db = await connectDB();
+
+  const ride = await db.collection("rides").findOne({
+    _id: new ObjectId(req.params.id)
+  });
+
   if (!ride) {
-    return res.status(404).json({
-      message: "Ride not found"
-    });
+    return res.status(404).json({ message: "Ride not found" });
   }
 
   if (ride.seats <= 0) {
-    return res.status(400).json({
-      message: "No seats available"
-    });
+    return res.status(400).json({ message: "No seats available" });
   }
 
-  ride.requests.push(user);
-
-  res.json({
-    message: "Request sent"
+  await db.collection("joinRequests").insertOne({
+    rideId: ride._id,
+    user,
+    status: "PENDING"
   });
+
+  res.json({ message: "Request sent" });
+});
+
+app.get("/api/rides/:id/requests", async (req, res) => {
+  const { ObjectId } = require("mongodb");
+  const db = await connectDB();
+
+  const requests = await db.collection("joinRequests")
+    .find({
+      rideId: new ObjectId(req.params.id)
+    })
+    .toArray();
+
+  res.json(requests);
 });
 
 /* ACCEPT REQUEST */
-app.put("/api/rides/:id/accept", (req, res) => {
-  const ride = rides.find(r => r.id == req.params.id);
+app.put("/api/rides/:id/accept", async (req, res) => {
+  const { ObjectId } = require("mongodb");
   const { user } = req.body;
 
-  if (!ride) {
-    return res.status(404).json({
-      message: "Ride not found"
-    });
-  }
+  const db = await connectDB();
 
-  ride.requests = ride.requests.filter(r => r !== user);
-
-  if (ride.seats > 0) {
-    ride.seats--;
-  }
-
-  res.json({
-    message: "Request accepted"
+  const ride = await db.collection("rides").findOne({
+    _id: new ObjectId(req.params.id)
   });
+
+  if (!ride) {
+    return res.status(404).json({ message: "Ride not found" });
+  }
+
+  const request = await db.collection("joinRequests").findOne({
+    rideId: ride._id,
+    user: user,
+    status: "PENDING"
+  });
+
+  if (!request) {
+    return res.status(404).json({ message: "Request not found" });
+  }
+
+  if (ride.seats <= 0) {
+    return res.status(400).json({ message: "No seats available" });
+  }
+
+  await db.collection("joinRequests").updateOne(
+    { _id: request._id },
+    { $set: { status: "ACCEPTED" } }
+  );
+
+  await db.collection("rides").updateOne(
+    { _id: ride._id },
+    { $inc: { seats: -1 } }
+  );
+
+  res.json({ message: "Request accepted" });
 });
 
 /* SERVE REACT */
@@ -192,6 +219,7 @@ app.get("*", (req, res) => {
 });
 
 async function startServer(port = DEFAULT_PORT) {
+  await connectDB();
   const availablePort = await getNextAvailablePort(port);
 
   app.listen(availablePort, () => {

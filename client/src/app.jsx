@@ -140,9 +140,9 @@ function Home() {
             <p>💺 {ride.seats} seats</p>
             <p>👤 {ride.owner}</p>
 
-            <Link to={`/ride/${ride.id}`}>
-              <button>View Ride</button>
-            </Link>
+            <Link className="btn" to={`/ride/${ride._id.toString()}`}>
+  View Ride
+</Link>
 
           </div>
 
@@ -472,6 +472,7 @@ function RideDetails({ user }) {
 
 
 /* ---------- MY RIDES ---------- */
+/* ---------- MY RIDES ---------- */
 
 function MyRides({ user }) {
 
@@ -481,9 +482,26 @@ function MyRides({ user }) {
 
     fetch("/api/rides")
       .then(res => res.json())
-      .then(data => setRides(data));
+      .then(async data => {
 
-  }, []);
+        const mine = data.filter(
+          ride => ride.owner === user?.name
+        );
+
+        for (const ride of mine) {
+
+          const res = await fetch(
+            `/api/rides/${ride._id}/requests`
+          );
+
+          ride.requests = await res.json();
+        }
+
+        setRides(mine);
+
+      });
+
+  }, [user]);
 
   if (!user) {
     return (
@@ -493,23 +511,24 @@ function MyRides({ user }) {
     );
   }
 
-  const myRides = rides.filter(
-    ride => ride.owner === user.name
-  );
-
   const accept = async (rideId, name) => {
 
-    await fetch(`/api/rides/${rideId}/accept`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        user: name
-      })
-    });
+    const res = await fetch(
+      `/api/rides/${rideId}/accept`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          user: name
+        })
+      }
+    );
 
-    alert("Request accepted");
+    const data = await res.json();
+
+    alert(data.message);
 
     window.location.reload();
   };
@@ -519,9 +538,9 @@ function MyRides({ user }) {
 
       <h1>My Rides</h1>
 
-      {myRides.map(ride => (
+      {rides.map(ride => (
 
-        <div className="card" key={ride.id}>
+        <div className="card" key={ride._id}>
 
           <h3>
             {ride.from} → {ride.to}
@@ -532,22 +551,31 @@ function MyRides({ user }) {
           <h4>Join Requests</h4>
 
           {ride.requests.length === 0 ? (
+
             <p>No requests yet.</p>
+
           ) : (
 
-            ride.requests.map(name => (
+            ride.requests.map(request => (
 
-              <div className="request" key={name}>
+              <div
+                className="request"
+                key={request._id}
+              >
 
-                <span>{name}</span>
+                <span>
+                  {request.user} — {request.status}
+                </span>
 
-                <button
-                  onClick={() =>
-                    accept(ride.id, name)
-                  }
-                >
-                  Accept
-                </button>
+                {request.status === "PENDING" && (
+                  <button
+                    onClick={() =>
+                      accept(ride._id, request.user)
+                    }
+                  >
+                    Accept
+                  </button>
+                )}
 
               </div>
 

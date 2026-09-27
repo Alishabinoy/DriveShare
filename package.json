@@ -5,8 +5,12 @@
     "start": "npm run build --workspace client && node server.js",
     "test": "node --test"
   },
-  "workspaces": ["client"],
+  "workspaces": [
+    "client"
+  ],
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "mongodb": "^7.6.0",
+    "oracledb": "^7.0.1"
   }
 }
